@@ -12,6 +12,8 @@ pyvim
 Issues, questions, wishes, comments, feedback, remarks? Please create a GitHub
 issue, I appreciate it.
 
+|Build Status|
+
 
 Installation
 ------------
@@ -145,6 +147,29 @@ Maybe we will also have line folding and probably block editing. Maybe some
 day we will have a built-in Python debugger or mouse support. We'll see. :)
 
 
+Testing
+-------
+
+To run all tests, install pytest:
+
+    pip install pytest
+
+And then run from root pyvim directory:
+
+    py.test
+
+To test pyvim against all supported python versions, install tox:
+
+    pip install tox
+
+And then run from root pyvim directory:
+
+    tox
+
+You need to have installed all the supported versions of python in order to run
+tox command successfully.
+
+
 Why did I create Pyvim?
 -----------------------
 
@@ -186,11 +211,6 @@ Q
 A
  No, it uses only ``prompt-toolkit``.
 
-Q
- Why Python?
-A
- The only alternative would be Haskell, but I still have to learn that.
-
 
 Thanks
 ------
@@ -199,3 +219,7 @@ Thanks
 - To Jedi, pyflakes and the docopt Python libraries.
 - To the Python wcwidth port of Jeff Quast for support of double width characters.
 - To Guido van Rossum, for creating Python.
+
+
+.. |Build Status| image:: https://api.travis-ci.org/jonathanslenders/pyvim.svg?branch=master
+    :target: https://travis-ci.org/jonathanslenders/pyvim#

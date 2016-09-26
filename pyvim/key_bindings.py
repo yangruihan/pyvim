@@ -1,10 +1,8 @@
 from __future__ import unicode_literals
 
-from prompt_toolkit.filters import Condition, HasFocus, Filter, Always
+from prompt_toolkit.filters import Condition, HasFocus, Filter, ViInsertMode, ViNavigationMode
 from prompt_toolkit.key_binding.bindings.utils import create_handle_decorator
-from prompt_toolkit.key_binding.bindings.vi import ViStateFilter
 from prompt_toolkit.key_binding.manager import KeyBindingManager
-from prompt_toolkit.key_binding.vi_state import InputMode
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout.utils import find_window_for_buffer_name
 
@@ -31,17 +29,16 @@ def create_key_bindings(editor):
     """
     # Create new Key binding manager.
     manager = KeyBindingManager(
-        enable_vi_mode=Always(),
+        enable_vi_mode=True,
         enable_search=True,
-        enable_extra_page_navigation=Always(),
-        enable_system_bindings=Always())
+        enable_extra_page_navigation=True,
+        enable_system_bindings=True)
 
     # Filters.
     vi_buffer_focussed = Condition(lambda cli: cli.current_buffer_name.startswith('buffer-'))
 
-    in_insert_mode = (ViStateFilter(manager.get_vi_state, InputMode.INSERT) & vi_buffer_focussed)
-    in_navigation_mode = (ViStateFilter(manager.get_vi_state, InputMode.NAVIGATION) &
-                          vi_buffer_focussed)
+    in_insert_mode = ViInsertMode() & vi_buffer_focussed
+    in_navigation_mode = ViNavigationMode() & vi_buffer_focussed
 
     # Decorator.
     handle = create_handle_decorator(manager.registry)
@@ -89,7 +86,7 @@ def create_key_bindings(editor):
         """
         editor.enter_command_mode()
 
-    @handle(Keys.Tab, filter=ViStateFilter(manager.get_vi_state, InputMode.INSERT) &
+    @handle(Keys.Tab, filter=ViInsertMode() &
             ~HasFocus(COMMAND_BUFFER) & WhitespaceBeforeCursorOnLine())
     def autocomplete_or_indent(event):
         """

@@ -5,17 +5,18 @@ from __future__ import unicode_literals
 from prompt_toolkit.filters import HasFocus, HasSearch, Condition, HasArg, Always
 from prompt_toolkit.key_binding.vi_state import InputMode
 from prompt_toolkit.layout import HSplit, VSplit, FloatContainer, Float
-from prompt_toolkit.layout.containers import Window, ConditionalContainer, ScrollOffsets
+from prompt_toolkit.layout.containers import Window, ConditionalContainer, ScrollOffsets, ColorColumn
 from prompt_toolkit.layout.controls import BufferControl, FillControl
 from prompt_toolkit.layout.controls import TokenListControl
 from prompt_toolkit.layout.dimension import LayoutDimension
-from prompt_toolkit.layout.highlighters import SelectionHighlighter, SearchHighlighter, ConditionalHighlighter, MatchingBracketHighlighter
 from prompt_toolkit.layout.margins import ConditionalMargin, NumberredMargin
 from prompt_toolkit.layout.menus import CompletionsMenu
-from prompt_toolkit.layout.processors import Processor, ConditionalProcessor, BeforeInput, ShowTrailingWhiteSpaceProcessor, Transformation
+from prompt_toolkit.layout.processors import Processor, ConditionalProcessor, BeforeInput, ShowTrailingWhiteSpaceProcessor, Transformation, HighlightSelectionProcessor, HighlightSearchProcessor, HighlightMatchingBracketProcessor, TabsProcessor
 from prompt_toolkit.layout.screen import Char
 from prompt_toolkit.layout.toolbars import TokenListToolbar, SystemToolbar, SearchToolbar, ValidationToolbar, CompletionsToolbar
+from prompt_toolkit.layout.utils import explode_tokens
 from prompt_toolkit.mouse_events import MouseEventTypes
+from prompt_toolkit.reactive import Integer
 from prompt_toolkit.selection import SelectionType
 
 from pygments.token import Token
@@ -28,11 +29,25 @@ from .welcome_message import WELCOME_MESSAGE_TOKENS, WELCOME_MESSAGE_HEIGHT, WEL
 import pyvim.window_arrangement as window_arrangement
 
 import re
+import sys
 
 __all__ = (
     'EditorLayout',
     'get_terminal_title',
 )
+
+def _try_char(character, backup, encoding=sys.stdout.encoding):
+    """
+    Return `character` if it can be encoded using sys.stdout, else return the
+    backup character.
+    """
+    if character.encode(encoding, 'replace') == b'?':
+        return backup
+    else:
+        return character
+
+
+TABSTOP_DOT = _try_char('\u2508', '.')
 
 
 class TabsControl(TokenListControl):
@@ -276,8 +291,8 @@ class WindowStatusBar(TokenListToolbar):
     """
     def __init__(self, editor, editor_buffer, manager):
         def get_tokens(cli):
-            insert_mode = manager.get_vi_state(cli).input_mode == InputMode.INSERT
-            replace_mode = manager.get_vi_state(cli).input_mode == InputMode.REPLACE
+            insert_mode = cli.vi_state.input_mode == InputMode.INSERT
+            replace_mode = cli.vi_state.input_mode == InputMode.REPLACE
             sel = cli.buffers[editor_buffer.buffer_name].selection_state
             visual_line = sel is not None and sel.type == SelectionType.LINES
             visual_block = sel is not None and sel.type == SelectionType.BLOCK
@@ -348,7 +363,7 @@ class WindowStatusBarRuler(ConditionalContainer):
             Window(
                 TokenListControl(get_tokens, default_char=Char(' ', Token.Toolbar.Status), align_right=True),
                 height=LayoutDimension.exact(1),
-                width=LayoutDimension.exact(15)),
+              ),
             filter=Condition(lambda cli: editor.show_ruler))
 
 
@@ -359,7 +374,7 @@ class SimpleArgToolbar(ConditionalContainer):
     def __init__(self):
         def get_tokens(cli):
             if cli.input_processor.arg is not None:
-                return [(Token.Arg, ' %i ' % cli.input_processor.arg)]
+                return [(Token.Arg, ' %s ' % cli.input_processor.arg)]
             else:
                 return []
 
@@ -440,6 +455,11 @@ class EditorLayout(object):
             ]
         )
 
+    def get_vertical_border_char(self, cli):
+        " Return the character to be used for the vertical border. "
+        return Char(char=_try_char('\u2502', '|', cli.output.encoding()),
+                    token=Token.FrameBorder)
+
     def update(self):
         """
         Update layout to match the layout as described in the
@@ -463,8 +483,10 @@ class EditorLayout(object):
                 children = []
                 for n in node:
                     children.append(create_layout_from_node(n))
-                    children.append(Window(width=LayoutDimension.exact(1),
-                                           content=FillControl('\u2502', token=Token.FrameBorder)))
+                    children.append(
+                        Window(width=LayoutDimension.exact(1),
+                               content=FillControl(
+                                   get_char=self.get_vertical_border_char)))
                 children.pop()
                 return VSplit(children)
 
@@ -478,15 +500,27 @@ class EditorLayout(object):
         """
         Create a Window for the buffer, with underneat a status bar.
         """
-        window = Window(self._create_buffer_control(editor_buffer),
-                        allow_scroll_beyond_bottom=Always(),
-                        scroll_offsets=PyvimScrollOffsets(self.editor),
-                        left_margins=[ConditionalMargin(
-                                margin=NumberredMargin(
-                                    buffer_name=editor_buffer.buffer_name,
-                                    relative=Condition(lambda cli: self.editor.relative_number)),
-                                filter=Condition(lambda cli: self.editor.show_line_numbers))])
+        @Condition
+        def wrap_lines(cli):
+            return self.editor.wrap_lines
 
+        window = Window(
+            self._create_buffer_control(editor_buffer),
+            allow_scroll_beyond_bottom=Always(),
+            scroll_offsets=ScrollOffsets(
+                left=0, right=0,
+                top=Integer.from_callable(lambda: self.editor.scroll_offset),
+                bottom=Integer.from_callable(lambda: self.editor.scroll_offset)),
+            wrap_lines=wrap_lines,
+            left_margins=[ConditionalMargin(
+                    margin=NumberredMargin(
+                        display_tildes=True,
+                        relative=Condition(lambda cli: self.editor.relative_number)),
+                    filter=Condition(lambda cli: self.editor.show_line_numbers))],
+            cursorline=Condition(lambda cli: self.editor.cursorline),
+            cursorcolumn=Condition(lambda cli: self.editor.cursorcolumn),
+            get_colorcolumns=(
+                lambda cli: [ColorColumn(pos) for pos in self.editor.colorcolumn]))
 
         return HSplit([
             window,
@@ -506,10 +540,6 @@ class EditorLayout(object):
         def preview_search(cli):
             return self.editor.incsearch
 
-        @Condition
-        def wrap_lines(cli):
-            return self.editor.wrap_lines
-
         input_processors = [
             # Processor for visualising spaces. (should come before the
             # selection processor, otherwise, we won't see these spaces
@@ -518,31 +548,27 @@ class EditorLayout(object):
                 ShowTrailingWhiteSpaceProcessor(),
                 Condition(lambda cli: self.editor.display_unprintable_characters)),
 
+            # Replace tabs by spaces.
+            TabsProcessor(
+                tabstop=Integer.from_callable(lambda: self.editor.tabstop),
+                get_char1=(lambda cli: '|' if self.editor.display_unprintable_characters else ' '),
+                get_char2=(lambda cli: _try_char('\u2508', '.', cli.output.encoding())
+                                       if self.editor.display_unprintable_characters else ' '),
+            ),
+
             # Reporting of errors, for Pyflakes.
             ReportingProcessor(editor_buffer),
-
-            # Replace tabs by spaces.
-            TabsProcessor(self.editor)]
-
-        highlighters = [
-            # Highlighting of the selection.
-            SelectionHighlighter(),
-
-            # Highlighting of the search.
-            ConditionalHighlighter(
-                SearchHighlighter(preview_search=preview_search),
+            HighlightSelectionProcessor(),
+            ConditionalProcessor(
+                HighlightSearchProcessor(preview_search=preview_search),
                 Condition(lambda cli: self.editor.highlight_search)),
-
-            # Highlight matching parentheses.
-            MatchingBracketHighlighter(),
+            HighlightMatchingBracketProcessor(),
         ]
 
         return BufferControl(lexer=DocumentLexer(editor_buffer),
                              input_processors=input_processors,
-                             highlighters=highlighters,
                              buffer_name=buffer_name,
                              preview_search=preview_search,
-                             wrap_lines=wrap_lines,
                              focus_on_click=True)
 
 
@@ -553,64 +579,17 @@ class ReportingProcessor(Processor):
     def __init__(self, editor_buffer):
         self.editor_buffer = editor_buffer
 
-    def apply_transformation(self, cli, document, tokens):
+    def apply_transformation(self, cli, document, lineno, source_to_display, tokens):
         if self.editor_buffer.report_errors:
             for error in self.editor_buffer.report_errors:
-                for i in range(error.start_index, error.end_index):
-                    if i < len(tokens):
-                        tokens[i] = (Token.FlakesError, tokens[i][1])
+                if error.lineno == lineno:
+                    tokens = explode_tokens(tokens)
+                    for i in range(error.start_column, error.end_column):
+                        if i < len(tokens):
+                            tokens[i] = (Token.FlakesError, tokens[i][1])
 
-        return Transformation(document, tokens)
+        return Transformation(tokens)
 
-    def invalidation_hash(self, cli, document):
-        return tuple(self.editor_buffer.report_errors)
-
-
-
-class TabsProcessor(Processor):
-    """
-    Render tabs as spaces or make them visible.
-    """
-    def __init__(self, editor):
-        self.editor = editor
-
-    def apply_transformation(self, cli, document, tokens):
-        tabstop = self.editor.tabstop
-
-        # Create separator for tabs.
-        if self.editor.display_unprintable_characters:
-            dots =  '\u2508'
-            separator = dots * tabstop
-            token = Token.Tab
-        else:
-            separator = ' ' * tabstop
-            token = None  # Don't replace the token.
-
-        # Remember the positions where we replace the tab.
-        positions = set()
-
-        # Replace tab by separator.
-        for i, value in enumerate(tokens):
-            if value[1] == '\t':
-                positions.add(i-1)
-                tokens[i] = (token or tokens[i][0], separator)
-
-        def source_to_display(from_position):
-            """ Maps original cursor position to the new one. """
-            count = len(list(p for p in positions if p < from_position -1))
-            return from_position + count * (tabstop - 1)
-
-        def display_to_source(display_pos):
-            return display_pos  # XXX
-
-        return Transformation(
-                document,
-                tokens,
-                source_to_display=source_to_display,
-                display_to_source=display_to_source)
-
-    def invalidation_hash(self, cli, document):
-        return (self.editor.tabstop, )
 
 
 def get_terminal_title(editor):

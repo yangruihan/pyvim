@@ -11,14 +11,13 @@ from __future__ import unicode_literals
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer, AcceptAction
-from prompt_toolkit.enums import SEARCH_BUFFER
+from prompt_toolkit.enums import SEARCH_BUFFER, EditingMode
 from prompt_toolkit.filters import Always, Condition
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.interface import CommandLineInterface
 from prompt_toolkit.key_binding.vi_state import InputMode
 from prompt_toolkit.shortcuts import create_eventloop
-from prompt_toolkit.utils import Callback
-from prompt_toolkit.styles import DynamicStyle, PygmentsStyle
+from prompt_toolkit.styles import DynamicStyle
 
 from .commands.completer import create_command_completer
 from .commands.handler import handle_command
@@ -62,6 +61,9 @@ class Editor(object):
         self.scroll_offset = 0  # ':set scrolloff'
         self.relative_number = False  # ':set relativenumber'
         self.wrap_lines = True  # ':set wrap'
+        self.cursorline = False  # ':set cursorline'
+        self.cursorcolumn = False  # ':set cursorcolumn'
+        self.colorcolumn = []  # ':set colorcolumn'. List of integers.
 
         # Ensure config directory exists.
         self.config_directory = os.path.abspath(os.path.expanduser(config_directory))
@@ -99,11 +101,8 @@ class Editor(object):
             eventloop=self.eventloop,
             application=self.application)
 
-        # Start in navigation mode.
-        self.key_bindings_manager.get_vi_state(self.cli).input_mode = InputMode.NAVIGATION
-
         # Hide message when a key is pressed.
-        def key_pressed():
+        def key_pressed(_):
             self.message = None
         self.cli.input_processor.beforeKeyPress += key_pressed
 
@@ -169,6 +168,7 @@ class Editor(object):
 
         # Create CLI.
         application = Application(
+            editing_mode=EditingMode.VI,
             layout=self.editor_layout.layout,
             key_bindings_registry=self.key_bindings_manager.registry,
             get_title=lambda: get_terminal_title(self),
@@ -176,17 +176,17 @@ class Editor(object):
                 COMMAND_BUFFER: command_buffer,
                 SEARCH_BUFFER: search_buffer,
             },
-            style=DynamicStyle(lambda: PygmentsStyle(self.current_style)),
+            style=DynamicStyle(lambda: self.current_style),
             paste_mode=Condition(lambda cli: self.paste_mode),
             ignore_case=Condition(lambda cli: self.ignore_case),
             mouse_support=Condition(lambda cli: self.enable_mouse_support),
             use_alternate_screen=True,
-            on_buffer_changed=Callback(self._current_buffer_changed))
+            on_buffer_changed=self._current_buffer_changed)
 
         # Handle command line previews.
         # (e.g. when typing ':colorscheme blue', it should already show the
         # preview before pressing enter.)
-        def preview():
+        def preview(_):
             if self.cli.current_buffer == command_buffer:
                 self.previewer.preview(command_buffer.text)
         command_buffer.on_text_changed += preview
@@ -266,6 +266,7 @@ class Editor(object):
         if name not in self._reporters_running_for_buffer_names:
             text = eb.buffer.text
             self._reporters_running_for_buffer_names.add(name)
+            eb.report_errors = []
 
             # Don't run reporter when we don't have a location. (We need to
             # know the filetype, actually.)
@@ -286,7 +287,7 @@ class Editor(object):
                     # reporter errors. (We were running in another thread.)
                     if text == eb.buffer.text:
                         eb.report_errors = report_errors
-                        self.cli._redraw()
+                        self.cli.invalidate()
                     else:
                         # Restart reporter when the text was changed.
                         self._current_buffer_changed(self.cli)
@@ -309,15 +310,19 @@ class Editor(object):
         # Make sure everything is in sync, before starting.
         self.sync_with_prompt_toolkit()
 
+        def pre_run():
+            # Start in navigation mode.
+            self.cli.vi_state.input_mode = InputMode.NAVIGATION
+
         # Run eventloop of prompt_toolkit.
-        self.cli.run(reset_current_buffer=False)
+        self.cli.run(reset_current_buffer=False, pre_run=pre_run)
 
     def enter_command_mode(self):
         """
         Go into command mode.
         """
         self.cli.push_focus(COMMAND_BUFFER)
-        self.key_bindings_manager.get_vi_state(self.cli).input_mode = InputMode.INSERT
+        self.cli.vi_state.input_mode = InputMode.INSERT
 
         self.previewer.save()
 
@@ -328,6 +333,6 @@ class Editor(object):
         self.previewer.restore()
 
         self.cli.pop_focus()
-        self.key_bindings_manager.get_vi_state(self.cli).input_mode = InputMode.NAVIGATION
+        self.cli.vi_state.input_mode = InputMode.NAVIGATION
 
         self.cli.buffers[COMMAND_BUFFER].reset(append_to_history=append_to_history)

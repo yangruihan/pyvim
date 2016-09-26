@@ -220,7 +220,7 @@ def buffer_list(editor):
             eb = info.editor_buffer
             print(' %3i %-2s %-20s  line %i' % (
                   info.index, char, eb.location, (eb.buffer.document.cursor_position_row + 1)))
-        (input() if six.PY3 else raw_input)('\nPress ENTER to continue...')
+        six.moves.input('\nPress ENTER to continue...')
     editor.cli.run_in_terminal(handler)
 
 
@@ -363,6 +363,8 @@ def help(editor):
     editor.show_help()
 
 
+@location_cmd('tabe')
+@location_cmd('tabedit')
 @location_cmd('tabnew')
 def tab_new(editor, location):
     """
@@ -372,6 +374,7 @@ def tab_new(editor, location):
 
 
 @cmd('tabclose')
+@cmd('tabc')
 def tab_close(editor):
     """
     Close tab page.
@@ -380,6 +383,7 @@ def tab_close(editor):
 
 
 @cmd('tabnext')
+@cmd('tabn')
 def tab_next(editor):
     """
     Go to next tab.
@@ -388,6 +392,7 @@ def tab_next(editor):
 
 
 @cmd('tabprevious')
+@cmd('tabp')
 def tab_previous(editor):
     """
     Go to previous tab.
@@ -396,6 +401,7 @@ def tab_previous(editor):
 
 
 @_cmd('colorscheme')
+@_cmd('colo')
 def color_scheme(editor, variables):
     """
     Go to one of the open buffers.
@@ -420,12 +426,14 @@ def line_numbers_hide(editor):
 
 
 @set_cmd('hlsearch')
+@set_cmd('hls')
 def search_highlight(editor):
     """ Highlight search matches. """
     editor.highlight_search = True
 
 
 @set_cmd('nohlsearch')
+@set_cmd('nohls')
 def search_no_highlight(editor):
     """ Don't highlight search matches. """
     editor.highlight_search = False
@@ -444,12 +452,14 @@ def paste_mode_leave(editor):
 
 
 @set_cmd('ruler')
+@set_cmd('ru')
 def ruler_show(editor):
     """ Show ruler. """
     editor.show_ruler = True
 
 
 @set_cmd('noruler')
+@set_cmd('noru')
 def ruler_hide(editor):
     """ Hide ruler. """
     editor.show_ruler = False
@@ -522,24 +532,28 @@ def set_scroll_offset(editor, value):
 
 
 @set_cmd('incsearch')
+@set_cmd('is')
 def incsearch_enable(editor):
     """ Enable incsearch. """
     editor.incsearch = True
 
 
 @set_cmd('noincsearch')
+@set_cmd('nois')
 def incsearch_disable(editor):
     """ Disable incsearch. """
     editor.incsearch = False
 
 
 @set_cmd('ignorecase')
+@set_cmd('ic')
 def search_ignorecase(editor):
     """ Enable case insensitive searching. """
     editor.ignore_case = True
 
 
 @set_cmd('noignorecase')
+@set_cmd('noic')
 def searc_no_ignorecase(editor):
     """ Disable case insensitive searching. """
     editor.ignore_case = False
@@ -570,12 +584,14 @@ def jedi_disable(editor):
 
 
 @set_cmd('relativenumber')
+@set_cmd('rnu')
 def relative_number(editor):
     " Enable relative number "
     editor.relative_number = True
 
 
 @set_cmd('norelativenumber')
+@set_cmd('nornu')
 def no_relative_number(editor):
     " Disable relative number "
     editor.relative_number = False
@@ -600,5 +616,56 @@ def enable_mouse(editor):
 
 @set_cmd('nomouse')
 def disable_mouse(editor):
-    " disable mouse. "
+    " Disable mouse. "
     editor.enable_mouse_support = False
+
+
+@set_cmd('tildeop')
+@set_cmd('top')
+def enable_tildeop(editor):
+    " Enable tilde operator. "
+    editor.cli.vi_state.tilde_operator = True
+
+
+@set_cmd('notildeop')
+@set_cmd('notop')
+def disable_tildeop(editor):
+    " Disable tilde operator. "
+    editor.cli.vi_state.tilde_operator = False
+
+
+@set_cmd('cursorline')
+@set_cmd('cul')
+def enable_cursorline(editor):
+    " Highlight the line that contains the cursor. "
+    editor.cursorline = True
+
+@set_cmd('nocursorline')
+@set_cmd('nocul')
+def disable_cursorline(editor):
+    " No cursorline. "
+    editor.cursorline = False
+
+@set_cmd('cursorcolumn')
+@set_cmd('cuc')
+def enable_cursorcolumn(editor):
+    " Highlight the column that contains the cursor. "
+    editor.cursorcolumn = True
+
+@set_cmd('nocursorcolumn')
+@set_cmd('nocuc')
+def disable_cursorcolumn(editor):
+    " No cursorcolumn. "
+    editor.cursorcolumn = False
+
+
+@set_cmd('colorcolumn', accepts_value=True)
+@set_cmd('cc', accepts_value=True)
+def set_scroll_offset(editor, value):
+    try:
+        value = [int(val) for val in value.split(',')]
+    except ValueError:
+        editor.show_message(
+            'Invalid value. Expecting comma separated list of integers')
+    else:
+        editor.colorcolumn = value
